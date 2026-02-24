@@ -1,0 +1,21 @@
+services:
+  quota_bot:
+    build: .
+    container_name: quota_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - DB_PATH=${DB_PATH:-data/quota_bot.db}
+    volumes:
+      - quota_bot_data:/app/data
+      - quota_bot_logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  quota_bot_data:
+  quota_bot_logs:
