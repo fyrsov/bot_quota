@@ -8,10 +8,16 @@ services:
       - ADMIN_IDS=${ADMIN_IDS}
       - DB_PATH=${DB_PATH:-data/quota_bot.db}
     volumes:
-      - /opt/quota_bot/data:/app/data
-      - /opt/quota_bot/logs:/app/logs
+      - bot_quota_quota_bot_data:/app/data
+      - bot_quota_quota_bot_logs:/app/logs
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  bot_quota_quota_bot_data:
+    external: true
+  bot_quota_quota_bot_logs:
+    external: true
