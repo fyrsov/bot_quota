@@ -24,6 +24,7 @@ from bot.keyboards.admin import (
     stats_period_kb,
     users_list_kb,
 )
+from bot.config import fmt_dt
 from bot.keyboards.employee import main_menu_kb
 from bot.services.export_service import build_excel
 from bot.services.quota_service import QuotaService
@@ -135,7 +136,7 @@ async def employee_detail(
         f"🆔 {user.telegram_id}\n"
         f"📦 Квота: {quota_info} | Использовано: {used}/{limit}\n"
         f"🛡 Админ: {'да' if user.is_admin else 'нет'}\n"
-        f"📅 Регистрация: {user.created_at.strftime('%d.%m.%Y') if user.created_at else '?'}"
+        f"📅 Регистрация: {fmt_dt(user.created_at, '%d.%m.%Y')}"
     )
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -211,6 +212,11 @@ async def delete_user_execute(
     data = await state.get_data()
     user_id = data.get("del_user_id")
     await state.clear()
+
+    if user_id is None:
+        await callback.message.edit_text("Ошибка сессии. Повторите операцию.")
+        await callback.answer()
+        return
 
     repo = UserRepo(session)
     deleted = await repo.delete(user_id)
@@ -366,33 +372,67 @@ async def quota_role_selected(callback: CallbackQuery, state: FSMContext) -> Non
 
 
 @router.callback_query(AdminQuotaStates.choose_target, F.data == "quota_personal")
-async def quota_personal_selected(callback: CallbackQuery, state: FSMContext) -> None:
+async def quota_personal_selected(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
     await state.update_data(quota_target="personal")
-    await callback.message.edit_text("Введите <b>Telegram ID</b> сотрудника:", parse_mode="HTML")
-    await state.set_state(AdminQuotaStates.waiting_user_id)
+    repo = UserRepo(session)
+    users = await repo.get_all()
+    if not users:
+        await callback.message.edit_text("Нет зарегистрированных сотрудников.")
+        await state.clear()
+        await callback.answer()
+        return
+    total_pages = max(1, (len(users) + _USERS_PAGE_SIZE - 1) // _USERS_PAGE_SIZE)
+    await callback.message.edit_text(
+        "Выберите сотрудника:",
+        reply_markup=users_list_kb(users[:_USERS_PAGE_SIZE], 0, total_pages, "quser"),
+    )
+    await state.set_state(AdminQuotaStates.choose_user)
     await callback.answer()
 
 
-@router.message(AdminQuotaStates.waiting_user_id)
-async def quota_personal_user_id(
-    message: Message, state: FSMContext, session: AsyncSession
+@router.callback_query(AdminQuotaStates.choose_user, F.data.startswith("quser:page:"))
+async def quota_personal_page(
+    callback: CallbackQuery, session: AsyncSession
 ) -> None:
-    text = (message.text or "").strip()
-    if not text.lstrip("-").isdigit():
-        await message.answer("Введите числовой Telegram ID:")
+    try:
+        page = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
-    user_id = int(text)
+    repo = UserRepo(session)
+    users = await repo.get_all()
+    total_pages = max(1, (len(users) + _USERS_PAGE_SIZE - 1) // _USERS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    page_users = users[page * _USERS_PAGE_SIZE: (page + 1) * _USERS_PAGE_SIZE]
+    await callback.message.edit_reply_markup(
+        reply_markup=users_list_kb(page_users, page, total_pages, "quser")
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminQuotaStates.choose_user, F.data.startswith("quser:user:"))
+async def quota_personal_user_selected(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession
+) -> None:
+    try:
+        user_id = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
     repo = UserRepo(session)
     user = await repo.get_by_telegram_id(user_id)
     if not user:
-        await message.answer("Сотрудник с таким ID не найден. Попробуйте ещё раз:")
+        await callback.answer("Пользователь не найден", show_alert=True)
         return
     await state.update_data(quota_user_id=user_id)
-    await message.answer(
-        f"Введите новый лимит для <b>{user.full_name}</b> (целое число):",
+    await callback.message.edit_text(
+        f"Введите новый лимит для <b>{user.full_name}</b> (целое число от 0 до 1000):",
         parse_mode="HTML",
     )
     await state.set_state(AdminQuotaStates.waiting_limit)
+    await callback.answer()
 
 
 @router.message(AdminQuotaStates.waiting_limit)
@@ -480,7 +520,7 @@ async def admin_return_site(message: Message, state: FSMContext, session: AsyncS
 
     user = await user_repo.get_by_telegram_id(record.user_id)
     user_name = user.full_name if user else f"ID:{record.user_id}"
-    date_str = record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "?"
+    date_str = fmt_dt(record.created_at)
 
     await state.update_data(site_number=text)
     await message.answer(
@@ -639,7 +679,11 @@ async def broadcast_choose_one(
 async def broadcast_user_page(
     callback: CallbackQuery, session: AsyncSession
 ) -> None:
-    page = int(callback.data.split(":")[-1])
+    try:
+        page = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
     repo = UserRepo(session)
     users = await repo.get_all()
     total_pages = max(1, (len(users) + _USERS_PAGE_SIZE - 1) // _USERS_PAGE_SIZE)
@@ -655,7 +699,11 @@ async def broadcast_user_page(
 async def broadcast_user_selected(
     callback: CallbackQuery, state: FSMContext, session: AsyncSession
 ) -> None:
-    user_id = int(callback.data.split(":")[-1])
+    try:
+        user_id = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
     repo = UserRepo(session)
     user = await repo.get_by_telegram_id(user_id)
     if not user:
@@ -683,14 +731,20 @@ async def broadcast_got_text(message: Message, state: FSMContext, session: Async
     await state.update_data(broadcast_text=text)
     data = await state.get_data()
 
-    if data["broadcast_target"] == "all":
+    broadcast_target = data.get("broadcast_target")
+    if not broadcast_target:
+        await message.answer("Ошибка сессии. Начните рассылку заново.")
+        await state.clear()
+        return
+
+    if broadcast_target == "all":
         repo = UserRepo(session)
         users = await repo.get_all()
         preview = f"Отправить всем сотрудникам (<b>{len(users)}</b> чел.):\n\n"
     else:
         repo = UserRepo(session)
-        user = await repo.get_by_telegram_id(data["broadcast_user_id"])
-        name = user.full_name if user else str(data["broadcast_user_id"])
+        user = await repo.get_by_telegram_id(data.get("broadcast_user_id"))
+        name = user.full_name if user else str(data.get("broadcast_user_id"))
         preview = f"Отправить сотруднику <b>{name}</b>:\n\n"
 
     await message.answer(
@@ -709,13 +763,20 @@ async def broadcast_send(
     data = await state.get_data()
     await state.clear()
 
-    text = f"📢 <b>Сообщение от администратора:</b>\n\n{data['broadcast_text']}"
+    broadcast_text = data.get("broadcast_text")
+    broadcast_target = data.get("broadcast_target")
+    if not broadcast_text or not broadcast_target:
+        await callback.message.edit_text("Ошибка сессии. Начните рассылку заново.")
+        await callback.answer()
+        return
+
+    text = f"📢 <b>Сообщение от администратора:</b>\n\n{broadcast_text}"
     repo = UserRepo(session)
 
-    if data["broadcast_target"] == "all":
+    if broadcast_target == "all":
         users = await repo.get_all()
     else:
-        u = await repo.get_by_telegram_id(data["broadcast_user_id"])
+        u = await repo.get_by_telegram_id(data.get("broadcast_user_id"))
         users = [u] if u else []
 
     sent, failed = 0, 0
@@ -742,6 +803,84 @@ async def broadcast_send(
 
     await callback.message.edit_text(result, parse_mode="HTML")
     await callback.answer()
+
+
+# ---------------------------------------------------------------------------
+# История возвратов
+# ---------------------------------------------------------------------------
+
+_RETURNS_PAGE_SIZE = 10
+
+
+@router.message(F.text == "📋 История возвратов")
+async def returns_history(message: Message, session: AsyncSession) -> None:
+    record_repo = RecordRepo(session)
+    total = await record_repo.count_cancelled_records()
+    if total == 0:
+        await message.answer("Возвратов ещё не было.")
+        return
+    records = await record_repo.get_cancelled_records(offset=0, limit=_RETURNS_PAGE_SIZE)
+    user_repo = UserRepo(session)
+    users = await user_repo.get_all()
+    user_map = {u.telegram_id: u for u in users}
+    total_pages = max(1, (total + _RETURNS_PAGE_SIZE - 1) // _RETURNS_PAGE_SIZE)
+    text = _build_returns_text(records, user_map, 0, total_pages, total)
+    await message.answer(text, parse_mode="HTML", reply_markup=_returns_page_kb(0, total_pages))
+
+
+@router.callback_query(F.data.startswith("returns:page:"))
+async def returns_history_page(callback: CallbackQuery, session: AsyncSession) -> None:
+    try:
+        page = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+    record_repo = RecordRepo(session)
+    total = await record_repo.count_cancelled_records()
+    total_pages = max(1, (total + _RETURNS_PAGE_SIZE - 1) // _RETURNS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    records = await record_repo.get_cancelled_records(
+        offset=page * _RETURNS_PAGE_SIZE, limit=_RETURNS_PAGE_SIZE
+    )
+    user_repo = UserRepo(session)
+    users = await user_repo.get_all()
+    user_map = {u.telegram_id: u for u in users}
+    text = _build_returns_text(records, user_map, page, total_pages, total)
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=_returns_page_kb(page, total_pages)
+    )
+    await callback.answer()
+
+
+def _build_returns_text(records, user_map, page, total_pages, total) -> str:
+    lines = [f"📋 <b>История возвратов</b> (всего: {total})\n"]
+    for rec in records:
+        u = user_map.get(rec.user_id)
+        name = u.full_name if u else f"ID:{rec.user_id}"
+        taken = fmt_dt(rec.created_at)
+        returned = fmt_dt(rec.cancelled_at)
+        lines.append(
+            f"👤 <b>{name}</b> — №{rec.site_number}\n"
+            f"  📦 Взял: {taken}\n"
+            f"  ↩️ Вернул: {returned}"
+        )
+    lines.append(f"\nСтр. {page + 1}/{total_pages}")
+    return "\n".join(lines)
+
+
+def _returns_page_kb(page: int, total_pages: int):
+    from aiogram.types import InlineKeyboardButton
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="←", callback_data=f"returns:page:{page - 1}"))
+    nav.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="→", callback_data=f"returns:page:{page + 1}"))
+    if nav:
+        builder.row(*nav)
+    return builder.as_markup()
 
 
 # ---------------------------------------------------------------------------

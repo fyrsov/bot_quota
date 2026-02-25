@@ -14,6 +14,7 @@ from bot.keyboards.employee import (
     history_pagination_kb,
     main_menu_kb,
 )
+from bot.config import fmt_dt
 from bot.services.quota_service import QuotaService
 from bot.states.employee import ReturnStates, TakeStates
 
@@ -111,7 +112,11 @@ async def history_page_callback(
     if not _require_user(user):
         await callback.answer("Не зарегистрированы", show_alert=True)
         return
-    page = int(callback.data.split(":")[-1])
+    try:
+        page = int(callback.data.split(":")[-1])
+    except ValueError:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
     await _send_history_page(callback.message, user, session, page=page, edit=True)
     await callback.answer()
 
@@ -161,7 +166,7 @@ async def take_site_number(
     # Проверка дубля: нельзя взять дровницу дважды по одному договору в одном месяце
     existing = await RecordRepo(session).find_active(user.telegram_id, text)
     if existing:
-        date_str = existing.created_at.strftime("%d.%m.%Y %H:%M") if existing.created_at else "?"
+        date_str = fmt_dt(existing.created_at)
         await message.answer(
             f"⚠️ Дровница по договору <b>№{text}</b> уже была взята {date_str}.\n\n"
             "Нельзя взять дважды по одному договору в текущем месяце.",

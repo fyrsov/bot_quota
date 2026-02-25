@@ -53,3 +53,8 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Миграция: добавить cancelled_at если колонки ещё нет (для существующих БД)
+        result = await conn.execute(text("PRAGMA table_info(records)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "cancelled_at" not in columns:
+            await conn.execute(text("ALTER TABLE records ADD COLUMN cancelled_at DATETIME"))

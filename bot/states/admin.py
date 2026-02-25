@@ -7,8 +7,8 @@ class AdminReturnStates(StatesGroup):
 
 
 class AdminQuotaStates(StatesGroup):
-    choose_target = State()       # роль или конкретный пользователь
-    waiting_user_id = State()     # если персональная
+    choose_target = State()   # роль или конкретный пользователь
+    choose_user = State()     # если персональная — выбор из списка
     waiting_limit = State()
 
 

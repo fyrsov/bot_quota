@@ -32,6 +32,13 @@ async def cmd_start(message: Message, user, is_admin: bool, state: FSMContext) -
         )
         return
 
+    if is_admin:
+        await message.answer(
+            "Добро пожаловать, администратор!",
+            reply_markup=main_menu_kb(is_admin=True),
+        )
+        return
+
     await message.answer(
         "Добро пожаловать! Для начала работы нужно зарегистрироваться.\n\n"
         "Введите ваше <b>ФИО</b> (Фамилия Имя Отчество):",
@@ -91,6 +98,13 @@ async def process_role(
         return
 
     data = await state.get_data()
+    full_name = data.get("full_name")
+    phone = data.get("phone")
+    if not full_name or not phone:
+        await callback.answer("Сессия устарела. Начните регистрацию заново /start", show_alert=True)
+        await state.clear()
+        return
+
     repo = UserRepo(session)
 
     # Проверяем, что пользователь ещё не зарегистрирован (защита от дублей)
@@ -104,8 +118,8 @@ async def process_role(
 
     user = await repo.create(
         telegram_id=callback.from_user.id,
-        full_name=data["full_name"],
-        phone=data["phone"],
+        full_name=full_name,
+        phone=phone,
         role=role,
         is_admin=callback.from_user.id in settings.admin_id_list,
     )

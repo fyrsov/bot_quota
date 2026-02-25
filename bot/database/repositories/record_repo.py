@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +7,7 @@ from bot.database.models import Record
 
 
 def _current_month() -> str:
-    return datetime.now().strftime("%Y-%m")
+    return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
 class RecordRepo:
@@ -57,8 +57,27 @@ class RecordRepo:
         await self._session.execute(
             update(Record)
             .where(Record.id == record_id)
-            .values(is_cancelled=True)
+            .values(is_cancelled=True, cancelled_at=datetime.now(timezone.utc))
         )
+
+    async def get_cancelled_records(
+        self, months: list[str] | None = None, offset: int = 0, limit: int = 20
+    ) -> list[Record]:
+        """Все отменённые записи (возвраты), новые первые."""
+        query = select(Record).where(Record.is_cancelled.is_(True))
+        if months:
+            query = query.where(Record.month.in_(months))
+        query = query.order_by(Record.cancelled_at.desc()).offset(offset).limit(limit)
+        result = await self._session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_cancelled_records(self, months: list[str] | None = None) -> int:
+        """Количество отменённых записей за период."""
+        query = select(func.count(Record.id)).where(Record.is_cancelled.is_(True))
+        if months:
+            query = query.where(Record.month.in_(months))
+        result = await self._session.execute(query)
+        return result.scalar_one()
 
     async def get_history(
         self, user_id: int, offset: int = 0, limit: int = 30
@@ -90,6 +109,15 @@ class RecordRepo:
         result = await self._session.execute(
             select(Record)
             .where(Record.month == month, Record.is_cancelled.is_(False))
+            .order_by(Record.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_month_all_users_full(self, month: str) -> list[Record]:
+        """Все записи за месяц включая возвраты (для полного отчёта)."""
+        result = await self._session.execute(
+            select(Record)
+            .where(Record.month == month)
             .order_by(Record.created_at)
         )
         return list(result.scalars().all())

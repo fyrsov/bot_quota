@@ -78,6 +78,7 @@ class Record(Base):
     )
     month: Mapped[str] = mapped_column(String(7))  # "2026-02"
     is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="records")
 

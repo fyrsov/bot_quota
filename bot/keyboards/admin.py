@@ -9,7 +9,7 @@ def admin_menu_kb() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="👥 Сотрудники"), KeyboardButton(text="📊 Статистика")],
         [KeyboardButton(text="🔧 Квоты"), KeyboardButton(text="↩️ Вернуть (админ)")],
         [KeyboardButton(text="📥 Выгрузить отчёт"), KeyboardButton(text="📢 Рассылка")],
-        [KeyboardButton(text="◀️ Назад")],
+        [KeyboardButton(text="◀️ Назад"), KeyboardButton(text="📋 История возвратов")],
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 

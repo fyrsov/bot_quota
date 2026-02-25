@@ -36,10 +36,12 @@ class QuotaService:
         """
         Списывает 1 единицу квоты.
         Возвращает созданную запись или None если квота исчерпана.
+        rollback() завершает lazy-транзакцию SQLAlchemy, после чего
         BEGIN IMMEDIATE сериализует конкурентные запросы в SQLite,
         исключая race condition при двойном нажатии.
         """
         session = self._record_repo._session
+        await session.rollback()
         await session.execute(text("BEGIN IMMEDIATE"))
         status = await self.get_status(user)
         if not status.has_quota:
