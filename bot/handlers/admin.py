@@ -247,26 +247,21 @@ def _build_stats_text(records: list, user_map: dict, months: list[str], period_l
     for rec in records:
         by_user[rec.user_id][rec.month].append(rec)
 
-    # Сортируем месяцы от новых к старым для заголовков колонок
-    sorted_months = sorted(months, reverse=True)
-    month_short = {m: datetime.strptime(m, "%Y-%m").strftime("%b'%y") for m in sorted_months}
-
     lines = [f"📊 <b>{period_label}</b>", f"Всего выдано: <b>{len(records)}</b>\n"]
     for uid, months_data in sorted(by_user.items(), key=lambda x: -sum(len(v) for v in x[1].values())):
         u = user_map.get(uid)
         name = u.full_name if u else f"ID:{uid}"
         role = ROLE_LABELS.get(u.role, u.role) if u else "—"
-        total = sum(len(v) for v in months_data.values())
-        lines.append(f"👤 <b>{name}</b> ({role}) — {total} шт.")
+        all_recs = [r for recs in months_data.values() for r in recs]
+        all_recs.sort(key=lambda r: r.created_at or datetime.min)
+        lines.append(f"👤 <b>{name}</b> ({role}) — {len(all_recs)} шт.")
 
-        # Разбивка по месяцам в одну строку: Фев'26: 3 | Янв'26: 4
-        month_parts = [
-            f"{month_short[m]}: {len(months_data[m])}"
-            for m in sorted_months
-            if m in months_data
+        # Каждая запись: №договора (дд.мм)
+        parts = [
+            f"№{r.site_number} ({fmt_dt(r.created_at, '%d.%m')})"
+            for r in all_recs
         ]
-        if len(sorted_months) > 1:
-            lines.append("  " + " | ".join(month_parts))
+        lines.append("  " + " | ".join(parts))
         lines.append("")
 
     return "\n".join(lines).strip()

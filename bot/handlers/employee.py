@@ -205,6 +205,8 @@ async def take_confirm(
     site_number = data.get("site_number", "")
     await state.clear()
 
+    user_id = user.telegram_id
+    user_role = user.role
     service = QuotaService(session)
     record = await service.take(user, site_number)
 
@@ -213,7 +215,7 @@ async def take_confirm(
         await callback.answer()
         return
 
-    status = await service.get_status(user)
+    status = await service.get_status_for(user_id, user_role)
     await callback.message.edit_text(
         f"✅ Дровница выдана!\n\n"
         f"📋 №{site_number}\n"

@@ -28,8 +28,11 @@ class QuotaService:
         self._record_repo = RecordRepo(session)
 
     async def get_status(self, user: User) -> QuotaStatus:
-        limit = await self._quota_repo.get_limit(user.telegram_id, user.role)
-        used = await self._record_repo.count_used(user.telegram_id)
+        return await self.get_status_for(user.telegram_id, user.role)
+
+    async def get_status_for(self, user_id: int, user_role: str) -> QuotaStatus:
+        limit = await self._quota_repo.get_limit(user_id, user_role)
+        used = await self._record_repo.count_used(user_id)
         return QuotaStatus(used=used, limit=limit)
 
     async def take(self, user: User, site_number: str) -> Record | None:
@@ -39,14 +42,19 @@ class QuotaService:
         rollback() завершает lazy-транзакцию SQLAlchemy, после чего
         BEGIN IMMEDIATE сериализует конкурентные запросы в SQLite,
         исключая race condition при двойном нажатии.
+        Значения user извлекаются до rollback(), т.к. после него
+        ORM-объект становится expired и недоступен без новой сессии.
         """
+        user_id = user.telegram_id
+        user_role = user.role
         session = self._record_repo._session
         await session.rollback()
         await session.execute(text("BEGIN IMMEDIATE"))
-        status = await self.get_status(user)
-        if not status.has_quota:
+        limit = await self._quota_repo.get_limit(user_id, user_role)
+        used = await self._record_repo.count_used(user_id)
+        if used >= limit:
             return None
-        return await self._record_repo.create(user.telegram_id, site_number)
+        return await self._record_repo.create(user_id, site_number)
 
     async def return_own(self, user: User, site_number: str) -> Record | None:
         """
